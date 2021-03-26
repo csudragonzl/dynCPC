@@ -28,7 +28,7 @@ class MLLSTM(nn.Module):
         for i in range(self.layer_num):
             x, _ = self.layer_list[i](x)
         # return outputs and the last hidden embedding matrix
-        return x, x[:, -1, :]
+        return x, x[-1, :, :]
 
 
 # DynRNN class

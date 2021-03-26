@@ -88,11 +88,11 @@ def train(model: Model, x, edge_index, lookback=3):
     x_pred = model(x, edge_index, True)
     loss = torch.empty(1)
     for i in range(lookback):
-        loss += torch.mul(model.loss(x[i], x_pred), (i + 1) * 0.2)
+        loss += torch.mul(model.loss(x[i], x_pred[0]), (i + 1) * 0.2)
     loss.backward()
     optimizer.step()
 
-    return loss.item(), x_pred
+    return loss.item(), x_pred[0]
 
 
 if __name__ == '__main__':
