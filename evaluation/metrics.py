@@ -3,7 +3,7 @@ import numpy as np
 precision_pos = [2, 10, 100, 200, 300, 500, 1000]
 
 
-def computePrecisionCurve(predicted_edge_list, true_digraph, max_k=-1):
+def computePrecisionCurve(predicted_edge_list, true_graph, max_k=-1):
     if max_k == -1:
         max_k = len(predicted_edge_list)
     else:
@@ -15,7 +15,7 @@ def computePrecisionCurve(predicted_edge_list, true_digraph, max_k=-1):
     delta_factors = []
     correct_edge = 0
     for i in range(max_k):
-        if true_digraph.has_edge(sorted_edges[i][0], sorted_edges[i][1]):
+        if true_graph.has_edge(sorted_edges[i][0], sorted_edges[i][1]):
             correct_edge += 1
             delta_factors.append(1.0)
         else:
@@ -24,8 +24,8 @@ def computePrecisionCurve(predicted_edge_list, true_digraph, max_k=-1):
     return precision_scores, delta_factors
 
 
-def computeMAP(predicted_edge_list, true_digraph, max_k=-1):
-    node_num = true_digraph.number_of_nodes()
+def computeMAP(predicted_edge_list, true_graph, max_k=-1):
+    node_num = true_graph.number_of_nodes()
     node_edges = []
     for i in range(node_num):
         node_edges.append([])
@@ -34,10 +34,10 @@ def computeMAP(predicted_edge_list, true_digraph, max_k=-1):
     node_AP = [0.0] * node_num
     count = 0
     for i in range(node_num):
-        if true_digraph.out_degree(i) == 0:
+        if true_graph.degree(i) == 0:
             continue
         count += 1
-        precision_scores, delta_factors = computePrecisionCurve(node_edges[i], true_digraph, max_k)
+        precision_scores, delta_factors = computePrecisionCurve(node_edges[i], true_graph, max_k)
         precision_rectified = [p * d for p, d in zip(precision_scores, delta_factors)]
         if (sum(delta_factors) == 0):
             node_AP[i] = 0

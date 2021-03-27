@@ -83,7 +83,6 @@ def process(basepath: str):
 
 
 def train(model: Model, x, edge_index, lookback=3):
-    model.train()
     optimizer.zero_grad()
     x_pred = model(x, edge_index, True)
     loss = torch.empty(1)
@@ -100,20 +99,21 @@ if __name__ == '__main__':
     x_list, edge_index_list = process('data/enron')
     lookback = 3
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    encoder = Encoder(in_channels=x_list.size()[1], out_channels=128).to(device)
-    mllstm = MLLSTM(input_dim=128, output_dim=128, n_units=[300, 300])
-    model = Model(encoder=encoder, mllstm=mllstm, lookback=3, timestep=1).to(device)
-    optimizer = torch.optim.Adam(
-        model.parameters(), lr=0.001, weight_decay=0.00001)
-    start = t()
-    prev = start
     # x_list.size()[0] - lookback
-    for i in range(4):
+    for i in range(1):
+        encoder = Encoder(in_channels=x_list.size()[1], out_channels=128).to(device)
+        mllstm = MLLSTM(input_dim=128, output_dim=128, n_units=[300, 300])
+        model = Model(encoder=encoder, mllstm=mllstm, lookback=3, timestep=1).to(device)
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=0.001, weight_decay=0.00001)
+        start = t()
+        prev = start
         x_input = x_list[i:i+lookback]
         edge_index_input = {}
         for j in range(lookback):
             edge_index_input[j] = edge_index_list[i + j]
-        for epoch in range(1, 200 + 1):
+        model.train()
+        for epoch in range(1, 51):
             loss, _ = train(model, x_input, edge_index_input)
 
             now = t()
@@ -126,8 +126,10 @@ if __name__ == '__main__':
         _, x_pre = train(model, x_input, edge_index_input)
         adj_reconstruct = evaluation.evaluation_util.graphify(x_pre)
         edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
-        true_digraph = nx.from_edgelist(edge_index_list[i + lookback].permute(1, 0).numpy().tolist())
-        MAP = evaluation.metrics.computeMAP(edge_index_pre, true_digraph)
+        true_graph = nx.Graph()
+        true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
+        true_graph.add_edges_from(edge_index_list[i + lookback].permute(1, 0).numpy().tolist())
+        MAP = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
         print(MAP)
 
     print('1')
