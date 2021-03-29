@@ -12,7 +12,7 @@ import networkx as nx
 
 
 class Model(torch.nn.Module):
-    def __init__(self, encoder: Encoder, mllstm: MLLSTM, lookback, timestep, tau: float = 0.5, activation = F.relu):
+    def __init__(self, encoder: Encoder, mllstm: MLLSTM, lookback, timestep, tau: float = 0.5, activation = F.rrelu):
         super(Model, self).__init__()
         self.encoder = encoder
         self.mllstm = mllstm
