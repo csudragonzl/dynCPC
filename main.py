@@ -85,7 +85,7 @@ def process(basepath: str):
 def train(model: Model, x, edge_index, lookback=3):
     optimizer.zero_grad()
     x_pred = model(x, edge_index, True)
-    loss = torch.empty(1)
+    loss = torch.tensor(1e-10)
     for i in range(lookback):
         loss += torch.mul(model.loss(x[i], x_pred[0]), (i + 1) * 0.2)
     loss.backward()
