@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from model.encoder import Encoder
+from model.gcn_encoder import Encoder
 from model.lstm import MLLSTM
 import os
 from time import perf_counter as t
