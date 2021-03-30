@@ -1,11 +1,10 @@
 import torch
 import torch.nn as nn
 from torch_geometric.nn import GCNConv
-import torch.nn.functional as F
 
 
 class Encoder(torch.nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, activation=F.rrelu,
+    def __init__(self, in_channels: int, out_channels: int, activation=torch.rrelu,
                  base_model=GCNConv, k: int = 2):
         super(Encoder, self).__init__()
         self.base_model = base_model

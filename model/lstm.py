@@ -41,7 +41,7 @@ class DynRNN(nn.Module):
     encoder: MLLSTM
     decoder: MLLSTM
 
-    def __init__(self, input_dim, output_dim, look_back=3, n_units=None,  bias=True, **kwargs):
+    def __init__(self, input_dim, output_dim, look_back=3, n_units=None,  bias=True):
         super(DynRNN, self).__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
