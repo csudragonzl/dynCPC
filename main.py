@@ -64,13 +64,24 @@ class Model(torch.nn.Module):
 
 def process(basepath: str):
     edge_list_path = os.listdir(basepath)
-    edge_list_path.sort(key=lambda x: int(x[5:-6]))
+    if 'enron' in basepath:
+        edge_list_path.sort(key=lambda x: int(x[5:-6]))
+    elif 'HS11' in basepath:
+        edge_list_path.sort(key=lambda x: int(x[-5:-4]))
+    elif 'HS12' in basepath:
+        edge_list_path.sort(key=lambda x: int(x[-11:-10]))
+    elif 'primary' in basepath:
+        edge_list_path.sort(key=lambda x: int(x[-5:-4]))
     node_num = 0
     edge_index = {}
     edges_list = []
     for i in range(len(edge_list_path)):
         file = open(os.path.join(basepath, edge_list_path[i]), 'r')
-        edges = list(y.split('\t') for y in file.read().split('\n'))[:-1]
+        if 'primary' in basepath:
+            edges = list(y.split(' ')[:-1] for y in file.read().split('\n'))[:-1]
+        else:
+            edges = list(y.split('\t') for y in file.read().split('\n'))[:-1]
+        edges = list(set([tuple(t) for t in edges]))
         for j in range(len(edges)):
             edges[j] = list(int(z) - 1 for z in edges[j])
             for z in edges[j]:
@@ -89,63 +100,74 @@ def process(basepath: str):
 
 
 def train(model: Model, x, edge_index, lookback=3):
-    optimizer.zero_grad()
     x_pred = model(x, edge_index, True)
-    loss = torch.zeros(lookback)
+    loss = torch.zeros(lookback, model.timestep)
     for i in range(lookback):
-        loss[i] = model.loss(x[i], x_pred[0]) + (lookback - i) * 0.2
-    loss = loss.sum()
-    loss.backward()
-    optimizer.step()
+        for j in range(model.timestep):
+            loss[i][j] = model.loss(x[i], x_pred[j]) + (lookback - i + j) * 0.2
 
-    return loss.item(), x_pred[0]
+    return loss.sum(), x_pred
 
 
 if __name__ == '__main__':
     edge_index_list: dict
-    x_list, edge_index_list = process('data/enron')
-    lookback = 3
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    MAP_list = []
-    # x_list.size()[0] - lookback
-    for i in range(x_list.size()[0] - lookback):
-        encoder = Encoder(in_channels=x_list.size()[1], out_channels=64).to(device)
-        mllstm = MLLSTM(input_dim=64, output_dim=64, n_units=[300, 300]).to(device)
-        model = Model(encoder=encoder, mllstm=mllstm, timestep=1).to(device)
-        optimizer = torch.optim.Adam(
-            model.parameters(), lr=0.001, weight_decay=0.0001)
-        start = t()
-        prev = start
-        x_input = x_list[i:i+lookback]
-        edge_index_input = {}
-        for j in range(lookback):
-            edge_index_input[j] = edge_index_list[i + j]
-        model.train()
-        for epoch in range(1, 251):
-            loss, _ = train(model, x_input, edge_index_input)
+    data_list = ['enron', 'HS11', 'HS12', 'primary']
+    for data in data_list:
+        x_list, edge_index_list = process('data/' + data)
+        lookback = 3
+        timestamp = 3
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        MAP_all = []
+        # x_list.size()[0] - lookback
+        for i in range(x_list.size()[0] - lookback * 2 + 1):
+            encoder = Encoder(in_channels=x_list.size()[1], out_channels=64).to(device)
+            mllstm = MLLSTM(input_dim=64, output_dim=64, n_units=[300, 300]).to(device)
+            model = Model(encoder=encoder, mllstm=mllstm, timestep=timestamp).to(device)
+            optimizer = torch.optim.Adam(
+                model.parameters(), lr=0.001, weight_decay=0.0001)
+            start = t()
+            prev = start
+            x_input = x_list[i:i+lookback]
+            edge_index_input = {}
+            for j in range(lookback):
+                edge_index_input[j] = edge_index_list[i + j]
+            model.train()
+            for epoch in range(1, 251):
+                optimizer.zero_grad()
+                loss, _ = train(model, x_input, edge_index_input)
+                loss.backward()
+                optimizer.step()
 
-            now = t()
-            print(f'(T) | Epoch={epoch:03d}, loss={loss:.4f}, '
-                  f'this epoch {now - prev:.4f}, total {now - start:.4f}')
-            prev = now
+                now = t()
+                print(f'(T) | Epoch={epoch:03d}, loss={loss:.4f}, '
+                      f'this epoch {now - prev:.4f}, total {now - start:.4f}')
+                prev = now
 
-        print("=== Finish Training ===")
-        model.eval()
-        _, x_pre = train(model, x_input, edge_index_input)
-        adj_reconstruct = evaluation.evaluation_util.graphify(x_pre)
-        edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
-        true_graph = nx.Graph()
-        true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
-        true_graph.add_edges_from(edge_index_list[i + lookback].permute(1, 0).numpy().tolist())
-        MAP = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
-        MAP_list.append(MAP)
-        print('第' + str(i) + '-' + str(i + lookback) + '个时间片的MAP值为' + str(MAP))
-        print("=== Finish Evaluating ===")
-    print('mean MAP score is ' + str(np.mean(MAP_list)))
-    with open('result/enron_MAP.txt', mode='w+') as file:
-        file.write('数据集共有' + str(x_list.size()[0]) + '个时间片\n')
-        file.write('lookback的值为' + str(lookback) + '\nMAP的值分别为：')
-        for MAP in MAP_list:
-            file.write(str(MAP) + ' ')
-        file.write('\n')
-        file.write('mean MAP: ' + str(np.mean(MAP_list)))
+            print("=== Finish Training ===")
+            model.eval()
+            _, x_pre_list = train(model, x_input, edge_index_input)
+
+            MAP_list = []
+            for j in range(timestamp):
+                adj_reconstruct = evaluation.evaluation_util.graphify(x_pre_list[j])
+                edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
+                true_graph = nx.Graph()
+                true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
+                true_graph.add_edges_from(edge_index_list[i + lookback + j].permute(1, 0).numpy().tolist())
+                MAP = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
+                MAP_list.append(MAP)
+                print('第' + str(i) + '-' + str(i + lookback) + '个时间片的第' + str(j) + '步预测的MAP值为' + str(MAP))
+            print("=== Finish Evaluating ===")
+            MAP_all.append(MAP_list)
+        MAP_all = np.array(MAP_all).T
+        for i in range(timestamp):
+            print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(np.mean(MAP_all, axis=1)[i]))
+        with open('result/' + data + '/MAP.txt', mode='w+') as file:
+            file.write('数据集共有' + str(x_list.size()[0]) + '个时间片\n')
+            file.write('lookback的值为' + str(lookback) + ' 预测未来' + str(timestamp) + '步的时间片\nMAP的值分别为：\n')
+            for i in range(MAP_all.shape[0]):
+                file.write('预测未来第' + str(i) + '步：')
+                for MAP in MAP_all[i]:
+                    file.write(str(MAP) + ' ')
+                file.write('\n')
+                file.write('mean MAP: ' + str(np.mean(MAP_all[i])) + '\n')
