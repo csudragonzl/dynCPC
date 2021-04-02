@@ -25,14 +25,14 @@ class Model(torch.nn.Module):
     def forward(self, x: torch.tensor, edge_index: dict, link_pred: bool):
         # x是所有时间片的集合
         nodes_num = x.size()[1]
-        x_encoded = torch.empty(x.size()[0], x.size()[1], 64)
+        x_encoded = torch.empty(x.size()[0], x.size()[1], 64).to(device)
         for i in range(x.size()[0]):
             x_encoded[i] = self.encoder(x[i], edge_index[i])
         _, ct = self.mllstm(x_encoded[:])
         if link_pred:
-            pred = torch.empty((self.timestep, nodes_num, nodes_num))
+            pred = torch.empty((self.timestep, nodes_num, nodes_num)).to(device)
         else:
-            pred = torch.empty((self.timestep, nodes_num, 256))
+            pred = torch.empty((self.timestep, nodes_num, 256)).to(device)
         for i in np.arange(0, self.timestep):
             linear = self.Wk[i]
             if link_pred:
