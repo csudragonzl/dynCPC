@@ -96,13 +96,13 @@ def process(basepath: str):
             for z in edges[j]:
                 node_num = max(node_num, z)
         edges_list.append(edges_temp)
-        edges = torch.tensor(edges_temp).permute(1, 0)
+        edges = torch.tensor(edges_temp).permute(1, 0).to(device)
         edge_index[i] = edges
 
     # 节点总数要加1
     node_num += 1
     # 时间片的邻接矩阵
-    x = torch.zeros(len(edge_list_path), node_num, node_num)
+    x = torch.zeros(len(edge_list_path), node_num, node_num).to(device)
     for i in range(len(edge_list_path)):
         for j, k in edges_list[i]:
             x[i, j, k] = 1
@@ -113,7 +113,7 @@ def process(basepath: str):
 
 def train(model: Model, x, edge_index):
     x_pred = model(x, edge_index, True)
-    loss = torch.zeros(lookback, model.timestep)
+    loss = torch.zeros(lookback, model.timestep).to(device)
     for i in range(lookback):
         for j in range(model.timestep):
             loss[i][j] = model.loss(x[i], x_pred[j]) + (lookback - i + j) * theta
@@ -124,13 +124,13 @@ def train(model: Model, x, edge_index):
 if __name__ == '__main__':
     edge_index_list: dict
     data_list = ['cellphone', 'enron', 'fbmessages', 'HS11', 'HS12', 'primary', 'workplace']
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     for data in data_list:
         x_list, edge_index_list = process('data/' + data)
         for lookback in range(1, len(x_list) // 2):
             for embedding_size in [64, 128, 256]:
                 for theta in np.arange(0.1, 1.1, 0.1):
                     timestamp = lookback
-                    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
                     MAP_all = []
 
                     # 划分不同组输入
