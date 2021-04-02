@@ -8,6 +8,7 @@ from time import perf_counter as t
 import evaluation.evaluation_util
 import evaluation.metrics
 import networkx as nx
+import pandas as pd
 
 
 class Model(torch.nn.Module):
@@ -66,108 +67,129 @@ def process(basepath: str):
     edge_list_path = os.listdir(basepath)
     if 'enron' in basepath:
         edge_list_path.sort(key=lambda x: int(x[5:-6]))
-    elif 'HS11' in basepath:
+    elif 'HS11' in basepath or 'primary' in basepath or 'workplace' in basepath or 'fbmessages' in basepath:
         edge_list_path.sort(key=lambda x: int(x[-5:-4]))
     elif 'HS12' in basepath:
         edge_list_path.sort(key=lambda x: int(x[-11:-10]))
-    elif 'primary' in basepath:
-        edge_list_path.sort(key=lambda x: int(x[-5:-4]))
+    elif 'cellphone' in basepath:
+        edge_list_path.sort(key=lambda x: int(x[9:-6]))
     node_num = 0
     edge_index = {}
     edges_list = []
     for i in range(len(edge_list_path)):
         file = open(os.path.join(basepath, edge_list_path[i]), 'r')
-        if 'primary' in basepath:
-            edges = list(y.split(' ')[:-1] for y in file.read().split('\n'))[:-1]
+        # 不同的数据文件分隔符不一样
+        if 'primary' in basepath or 'fbmessages' in basepath or 'primary' in basepath or 'workplace' in basepath:
+            edges = list(y.split(' ')[:2] for y in file.read().split('\n'))[:-1]
         else:
-            edges = list(y.split('\t') for y in file.read().split('\n'))[:-1]
+            edges = list(y.split('\t')[:2] for y in file.read().split('\n'))[:-1]
+        # 去除重复的边
         edges = list(set([tuple(t) for t in edges]))
+        edges_temp = []
         for j in range(len(edges)):
+            # 将字符的边转为int型
             edges[j] = list(int(z) - 1 for z in edges[j])
+            # 去除反向的边
+            if [edges[j][1], edges[j][0]] not in edges_temp and edges[j][1] != edges[j][0]:
+                edges_temp.append(edges[j])
+            # 找到节点数
             for z in edges[j]:
                 node_num = max(node_num, z)
-        edges_list.append(edges)
-        edges = torch.tensor(edges).permute(1, 0)
+        edges_list.append(edges_temp)
+        edges = torch.tensor(edges_temp).permute(1, 0)
         edge_index[i] = edges
 
+    # 节点总数要加1
     node_num += 1
+    # 时间片的邻接矩阵
     x = torch.zeros(len(edge_list_path), node_num, node_num)
     for i in range(len(edge_list_path)):
         for j, k in edges_list[i]:
             x[i, j, k] = 1
+            x[i, k, j] = 1
 
     return x, edge_index
 
 
-def train(model: Model, x, edge_index, lookback=3):
+def train(model: Model, x, edge_index):
     x_pred = model(x, edge_index, True)
     loss = torch.zeros(lookback, model.timestep)
     for i in range(lookback):
         for j in range(model.timestep):
-            loss[i][j] = model.loss(x[i], x_pred[j]) + (lookback - i + j) * 0.2
+            loss[i][j] = model.loss(x[i], x_pred[j]) + (lookback - i + j) * theta
 
     return loss.sum(), x_pred
 
 
 if __name__ == '__main__':
     edge_index_list: dict
-    data_list = ['enron', 'HS11', 'HS12', 'primary']
+    data_list = ['cellphone', 'enron', 'fbmessages', 'HS11', 'HS12', 'primary', 'workplace']
     for data in data_list:
         x_list, edge_index_list = process('data/' + data)
-        lookback = 3
-        timestamp = 3
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        MAP_all = []
-        # x_list.size()[0] - lookback
-        for i in range(x_list.size()[0] - lookback * 2 + 1):
-            encoder = Encoder(in_channels=x_list.size()[1], out_channels=64).to(device)
-            mllstm = MLLSTM(input_dim=64, output_dim=64, n_units=[300, 300]).to(device)
-            model = Model(encoder=encoder, mllstm=mllstm, timestep=timestamp).to(device)
-            optimizer = torch.optim.Adam(
-                model.parameters(), lr=0.001, weight_decay=0.0001)
-            start = t()
-            prev = start
-            x_input = x_list[i:i+lookback]
-            edge_index_input = {}
-            for j in range(lookback):
-                edge_index_input[j] = edge_index_list[i + j]
-            model.train()
-            for epoch in range(1, 251):
-                optimizer.zero_grad()
-                loss, _ = train(model, x_input, edge_index_input)
-                loss.backward()
-                optimizer.step()
+        for lookback in range(1, len(x_list) // 2):
+            for embedding_size in [64, 128, 256]:
+                for theta in np.arange(0.1, 1.1, 0.1):
+                    timestamp = lookback
+                    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                    MAP_all = []
 
-                now = t()
-                print(f'(T) | Epoch={epoch:03d}, loss={loss:.4f}, '
-                      f'this epoch {now - prev:.4f}, total {now - start:.4f}')
-                prev = now
+                    # 划分不同组输入
+                    for i in range(x_list.size()[0] - lookback * 2 + 1):
+                        encoder = Encoder(in_channels=x_list.size()[1], out_channels=embedding_size).to(device)
+                        mllstm = MLLSTM(input_dim=embedding_size, output_dim=embedding_size, n_units=[300, 300]).to(device)
+                        model = Model(encoder=encoder, mllstm=mllstm, timestep=timestamp).to(device)
+                        optimizer = torch.optim.Adam(
+                            model.parameters(), lr=0.001, weight_decay=0.0001)
+                        start = t()
+                        prev = start
+                        x_input = x_list[i:i+lookback]
+                        edge_index_input = {}
+                        for j in range(lookback):
+                            edge_index_input[j] = edge_index_list[i + j]
+                        model.train()
+                        for epoch in range(1, 11):
+                            optimizer.zero_grad()
+                            loss, _ = train(model, x_input, edge_index_input)
+                            loss.backward()
+                            optimizer.step()
 
-            print("=== Finish Training ===")
-            model.eval()
-            _, x_pre_list = train(model, x_input, edge_index_input)
+                            now = t()
+                            print(f'(T) | Epoch={epoch:03d}, loss={loss:.4f}, '
+                                  f'this epoch {now - prev:.4f}, total {now - start:.4f}')
+                            prev = now
 
-            MAP_list = []
-            for j in range(timestamp):
-                adj_reconstruct = evaluation.evaluation_util.graphify(x_pre_list[j])
-                edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
-                true_graph = nx.Graph()
-                true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
-                true_graph.add_edges_from(edge_index_list[i + lookback + j].permute(1, 0).numpy().tolist())
-                MAP = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
-                MAP_list.append(MAP)
-                print('第' + str(i) + '-' + str(i + lookback) + '个时间片的第' + str(j) + '步预测的MAP值为' + str(MAP))
-            print("=== Finish Evaluating ===")
-            MAP_all.append(MAP_list)
-        MAP_all = np.array(MAP_all).T
-        for i in range(timestamp):
-            print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(np.mean(MAP_all, axis=1)[i]))
-        with open('result/' + data + '/MAP.txt', mode='w+') as file:
-            file.write('数据集共有' + str(x_list.size()[0]) + '个时间片\n')
-            file.write('lookback的值为' + str(lookback) + ' 预测未来' + str(timestamp) + '步的时间片\nMAP的值分别为：\n')
-            for i in range(MAP_all.shape[0]):
-                file.write('预测未来第' + str(i) + '步：')
-                for MAP in MAP_all[i]:
-                    file.write(str(MAP) + ' ')
-                file.write('\n')
-                file.write('mean MAP: ' + str(np.mean(MAP_all[i])) + '\n')
+                        print("=== Finish Training ===")
+                        model.eval()
+                        _, x_pre_list = train(model, x_input, edge_index_input)
+
+                        # 预测timestamp范围的MAP值
+                        MAP_list = []
+                        for j in range(timestamp):
+                            adj_reconstruct = evaluation.evaluation_util.graphify(x_pre_list[j])
+                            edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
+                            true_graph = nx.Graph()
+                            true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
+                            true_graph.add_edges_from(edge_index_list[i + lookback + j].permute(1, 0).numpy().tolist())
+                            MAP = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
+                            MAP_list.append(MAP)
+                            print('第' + str(i) + '-' + str(i + lookback) + '个时间片的第' + str(j) + '步预测的MAP值为' + str(MAP))
+                        print("=== Finish Evaluating ===")
+                        # 不同输入组的MAP值
+                        MAP_all.append(MAP_list)
+                    result = {}
+                    label = []
+                    for i in range(len(MAP_all)):
+                        column = '第' + str(i) + '-' + str(i + lookback) + '个时间片'
+                        result[column] = MAP_all[i]
+                    for j in range(timestamp):
+                        row = 'T+' + str(j)
+                        label.append(row)
+                    # 求所有输入组的平均MAP值
+                    MAP_all = np.array(MAP_all)
+                    mean_MAP = np.mean(MAP_all, axis=0).tolist()
+                    result['mean_MAP'] = mean_MAP
+                    for i in range(timestamp):
+                        print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(mean_MAP[i]))
+                    csv_path = 'result/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(embedding_size) + ',theta=' + str(theta) + '.csv'
+                    df = pd.DataFrame(result, index=label)
+                    df.to_csv(csv_path)
