@@ -147,7 +147,7 @@ if __name__ == '__main__':
                         for j in range(lookback):
                             edge_index_input[j] = edge_index_list[i + j]
                         model.train()
-                        for epoch in range(1, 11):
+                        for epoch in range(1, 251):
                             optimizer.zero_grad()
                             loss, _ = train(model, x_input, edge_index_input)
                             loss.backward()
