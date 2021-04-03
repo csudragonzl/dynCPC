@@ -165,11 +165,11 @@ if __name__ == '__main__':
                         # 预测timestamp范围的MAP值
                         MAP_list = []
                         for j in range(timestamp):
-                            adj_reconstruct = evaluation.evaluation_util.graphify(x_pre_list[j])
+                            adj_reconstruct = evaluation.evaluation_util.graphify(x_pre_list[j].cpu())
                             edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
                             true_graph = nx.Graph()
                             true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
-                            true_graph.add_edges_from(edge_index_list[i + lookback + j].permute(1, 0).numpy().tolist())
+                            true_graph.add_edges_from(edge_index_list[i + lookback + j].permute(1, 0).cpu().numpy().tolist())
                             MAP = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
                             MAP_list.append(MAP)
                             print('第' + str(i) + '-' + str(i + lookback) + '个时间片的第' + str(j) + '步预测的MAP值为' + str(MAP))
