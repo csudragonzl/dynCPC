@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def getEdgeListFromAdj(adj, threshold=0.0, is_undirected=True, edge_pairs=None):
+def getEdgeListFromAdj(adj, threshold=0.5, is_undirected=True, edge_pairs=None):
     result = []
     node_num = adj.shape[0]
     if edge_pairs:

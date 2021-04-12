@@ -19,7 +19,7 @@ class Model(torch.nn.Module):
         # timestep是预测的时间步长
         self.timestep = timestep
         self.tau = tau
-        self.Wk = nn.ModuleList([nn.Linear(mllstm.output_dim, encoder.input_dim, bias=False) for i in range(timestep)])
+        self.Wk = nn.ModuleList([nn.Linear(mllstm.output_dim * 2, 1, bias=False) for i in range(timestep)])
         self.activation = activation
 
     def forward(self, x: torch.tensor, edge_index: dict, link_pred: bool):
@@ -33,10 +33,15 @@ class Model(torch.nn.Module):
             pred = torch.empty((self.timestep, nodes_num, nodes_num)).to(device)
         else:
             pred = torch.empty((self.timestep, nodes_num, mllstm.output_dim)).to(device)
+        # 将每一个节点对应的embedding与其它所有节点的embedding组合起来送入MLP
+        ct_composed = torch.zeros(nodes_num ** 2, ct.size()[1] * 2).to(device)
+        for i in range(nodes_num):
+            ct_composed[i * nodes_num + i + 1:(i + 1) * nodes_num, :ct.size()[1]] = ct[i]
+            ct_composed[i * nodes_num + i + 1:(i + 1) * nodes_num, ct.size()[1]:] = ct[i + 1:]
         for i in np.arange(0, self.timestep):
             linear = self.Wk[i]
             if link_pred:
-                pred[i] = self.activation(linear(ct))
+                pred[i] = self.activation(linear(ct_composed)).reshape(nodes_num, nodes_num)
             else:
                 pred[i] = linear(ct)
         return pred
@@ -123,18 +128,20 @@ def train(model: Model, x, edge_index):
 
 if __name__ == '__main__':
     edge_index_list: dict
-    data_list = ['cellphone', 'enron', 'fbmessages', 'HS11', 'HS12', 'primary', 'workplace']
+    data_list = ['cellphone']
+        # , 'enron', 'fbmessages', 'HS11', 'HS12', 'primary', 'workplace']
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     for data in data_list:
         x_list, edge_index_list = process('data/' + data)
         for lookback in range(3, 4):
             for embedding_size in [128]:
                 for theta in np.arange(0.5, 0.6, 0.1):
-                    timestamp = 1
+                    timestamp = lookback
                     MAP_all = []
 
                     # 划分不同组输入 - lookback * 2 + 1
-                    for i in range(x_list.size()[0] - lookback):
+                    # for i in range(x_list.size()[0] - lookback * 2 + 1):
+                    for i in range(x_list.size()[0] - lookback * 2 + 1):
                         encoder = Encoder(in_channels=x_list.size()[1], out_channels=embedding_size).to(device)
                         mllstm = MLLSTM(input_dim=embedding_size, output_dim=embedding_size, n_units=[300, 300]).to(device)
                         model = Model(encoder=encoder, mllstm=mllstm, timestep=timestamp).to(device)
@@ -190,7 +197,8 @@ if __name__ == '__main__':
                     result['mean_MAP'] = mean_MAP
                     for i in range(timestamp):
                         print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(mean_MAP[i]))
-                    # csv_path = 'result/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(embedding_size) + ',theta=' + str(theta) + '.csv'
-                    csv_path = 'result/pred_one/' + data + '.csv'
+                    csv_path = 'result2.0/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(
+                    embedding_size) + ',theta=' + str(theta) + '.csv'
+                    # csv_path = 'result2.0/pred_one/' + data + '.csv'
                     df = pd.DataFrame(result, index=label)
                     df.to_csv(csv_path)
