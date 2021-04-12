@@ -25,14 +25,14 @@ class Model(torch.nn.Module):
     def forward(self, x: torch.tensor, edge_index: dict, link_pred: bool):
         # x是所有时间片的集合
         nodes_num = x.size()[1]
-        x_encoded = torch.empty(x.size()[0], x.size()[1], 64).to(device)
+        x_encoded = torch.empty(x.size()[0], x.size()[1], encoder.output_dim).to(device)
         for i in range(x.size()[0]):
             x_encoded[i] = self.encoder(x[i], edge_index[i])
         _, ct = self.mllstm(x_encoded[:])
         if link_pred:
             pred = torch.empty((self.timestep, nodes_num, nodes_num)).to(device)
         else:
-            pred = torch.empty((self.timestep, nodes_num, 256)).to(device)
+            pred = torch.empty((self.timestep, nodes_num, mllstm.output_dim)).to(device)
         for i in np.arange(0, self.timestep):
             linear = self.Wk[i]
             if link_pred:
@@ -127,14 +127,14 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     for data in data_list:
         x_list, edge_index_list = process('data/' + data)
-        for lookback in range(1, len(x_list) // 2):
-            for embedding_size in [64, 128, 256]:
-                for theta in np.arange(0.1, 1.1, 0.1):
-                    timestamp = lookback
+        for lookback in range(3, 4):
+            for embedding_size in [128]:
+                for theta in np.arange(0.5, 0.6, 0.1):
+                    timestamp = 1
                     MAP_all = []
 
-                    # 划分不同组输入
-                    for i in range(x_list.size()[0] - lookback * 2 + 1):
+                    # 划分不同组输入 - lookback * 2 + 1
+                    for i in range(x_list.size()[0] - lookback):
                         encoder = Encoder(in_channels=x_list.size()[1], out_channels=embedding_size).to(device)
                         mllstm = MLLSTM(input_dim=embedding_size, output_dim=embedding_size, n_units=[300, 300]).to(device)
                         model = Model(encoder=encoder, mllstm=mllstm, timestep=timestamp).to(device)
@@ -190,6 +190,7 @@ if __name__ == '__main__':
                     result['mean_MAP'] = mean_MAP
                     for i in range(timestamp):
                         print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(mean_MAP[i]))
-                    csv_path = 'result/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(embedding_size) + ',theta=' + str(theta) + '.csv'
+                    # csv_path = 'result/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(embedding_size) + ',theta=' + str(theta) + '.csv'
+                    csv_path = 'result/pred_one/' + data + '.csv'
                     df = pd.DataFrame(result, index=label)
                     df.to_csv(csv_path)
