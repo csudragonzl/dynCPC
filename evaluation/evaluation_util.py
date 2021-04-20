@@ -6,7 +6,7 @@ def getEdgeListFromAdj(adj, threshold=0.5, is_undirected=True, edge_pairs=None):
     node_num = adj.shape[0]
     if edge_pairs:
         for (st, ed) in edge_pairs:
-            if adj[st, ed] >= threshold:
+            if adj[st, ed] > threshold:
                 result.append((st, ed, adj[st, ed]))
     else:
         for i in range(node_num):

@@ -19,7 +19,7 @@ class Model(torch.nn.Module):
         # timestep是预测的时间步长
         self.timestep = timestep
         self.tau = tau
-        self.Wk = nn.ModuleList([nn.Linear(mllstm.output_dim * 2, 1, bias=False) for i in range(timestep)])
+        self.Wk = nn.ModuleList([nn.Linear(mllstm.output_dim, encoder.input_dim, bias=False) for i in range(timestep)])
         self.activation = activation
 
     def forward(self, x: torch.tensor, edge_index: dict, link_pred: bool):
@@ -33,15 +33,10 @@ class Model(torch.nn.Module):
             pred = torch.empty((self.timestep, nodes_num, nodes_num)).to(device)
         else:
             pred = torch.empty((self.timestep, nodes_num, mllstm.output_dim)).to(device)
-        # 将每一个节点对应的embedding与其它所有节点的embedding组合起来送入MLP
-        ct_composed = torch.zeros(nodes_num ** 2, ct.size()[1] * 2).to(device)
-        for i in range(nodes_num):
-            ct_composed[i * nodes_num + i + 1:(i + 1) * nodes_num, :ct.size()[1]] = ct[i]
-            ct_composed[i * nodes_num + i + 1:(i + 1) * nodes_num, ct.size()[1]:] = ct[i + 1:]
         for i in np.arange(0, self.timestep):
             linear = self.Wk[i]
             if link_pred:
-                pred[i] = self.activation(linear(ct_composed)).reshape(nodes_num, nodes_num)
+                pred[i] = self.activation(linear(ct))
             else:
                 pred[i] = linear(ct)
         return pred
@@ -88,13 +83,19 @@ def process(basepath: str):
             edges = list(y.split(' ')[:2] for y in file.read().split('\n'))[:-1]
         else:
             edges = list(y.split('\t')[:2] for y in file.read().split('\n'))[:-1]
+        for j in range(len(edges)):
+            # 将字符的边转为int型
+            edges[j] = list(int(z) - 1 for z in edges[j])
+
+        if 'fbmessages' in basepath:
+            if i > 0:
+                edges += edges_list[-1]
+
         # 去除重复的边
         edges = list(set([tuple(t) for t in edges]))
         edges_temp = []
         for j in range(len(edges)):
-            # 将字符的边转为int型
-            edges[j] = list(int(z) - 1 for z in edges[j])
-            # 去除反向的边
+            # 去除反向的边和自环
             if [edges[j][1], edges[j][0]] not in edges_temp and edges[j][1] != edges[j][0]:
                 edges_temp.append(edges[j])
             # 找到节点数
@@ -122,14 +123,17 @@ def train(model: Model, x, edge_index):
     for i in range(lookback):
         for j in range(model.timestep):
             loss[i][j] = model.loss(x[i], x_pred[j]) + (lookback - i + j) * theta
+            if i == j:
+                print('true:', x[i][:8, :8])
+                print('pred:', x_pred[j][:8, :8])
 
     return loss.sum(), x_pred
 
 
 if __name__ == '__main__':
     edge_index_list: dict
-    data_list = ['cellphone']
-        # , 'enron', 'fbmessages', 'HS11', 'HS12', 'primary', 'workplace']
+    data_list = ['fbmessages']
+        # cellphone, 'enron', 'fbmessages', 'HS11', 'HS12', 'primary', 'workplace']
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     for data in data_list:
         x_list, edge_index_list = process('data/' + data)
@@ -154,7 +158,7 @@ if __name__ == '__main__':
                         for j in range(lookback):
                             edge_index_input[j] = edge_index_list[i + j]
                         model.train()
-                        for epoch in range(1, 251):
+                        for epoch in range(1, 51):
                             optimizer.zero_grad()
                             loss, _ = train(model, x_input, edge_index_input)
                             loss.backward()
@@ -174,6 +178,7 @@ if __name__ == '__main__':
                         for j in range(timestamp):
                             adj_reconstruct = evaluation.evaluation_util.graphify(x_pre_list[j].cpu())
                             edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
+                            print('预测得到的边数为', len(edge_index_pre))
                             true_graph = nx.Graph()
                             true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
                             true_graph.add_edges_from(edge_index_list[i + lookback + j].permute(1, 0).cpu().numpy().tolist())
