@@ -12,7 +12,7 @@ import pandas as pd
 
 
 class Model(torch.nn.Module):
-    def __init__(self, encoder: Encoder, mllstm: MLLSTM, timestep, tau: float = 0.5, activation = torch.sigmoid):
+    def __init__(self, encoder: Encoder, mllstm: MLLSTM, timestep, tau, activation = torch.sigmoid):
         super(Model, self).__init__()
         self.encoder = encoder
         self.mllstm = mllstm
@@ -52,6 +52,23 @@ class Model(torch.nn.Module):
         #     node_indices = node_indices[:len(node_indices) // 10]
         #     res[i] = pos[i] / (between_sim[i, node_indices].sum(0) + pos[i])
 
+        # a = between_sim.diag()
+        # b = between_sim.sum(1)
+        # c = z1.detach().numpy()
+        # d = z2.detach().numpy()
+        # e = between_sim.detach().numpy()
+        # ret_temp = -torch.log(a / b).detach().numpy()
+        # a = a.detach().numpy()
+        # b = b.detach().numpy()
+        # for i in range(ret_temp.shape[0]):
+        #     if np.isnan(ret_temp[i]):
+        #         a = a[i]
+        #         b = b[i]
+        #         c = c[i]
+        #         d = d[i]
+        #         e = e[i]
+        #         f = np.dot(c, d)
+        #         print('1')
         return -torch.log(
             between_sim.diag() / between_sim.sum(1)
         )
@@ -132,7 +149,7 @@ def train(model: Model, x, edge_index):
 
 if __name__ == '__main__':
     edge_index_list: dict
-    data_list = ['fbmessages']
+    data_list = ['cellphone', 'enron', 'HS11', 'HS12', 'primary', 'workplace']
         # cellphone, 'enron', 'fbmessages', 'HS11', 'HS12', 'primary', 'workplace']
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     for data in data_list:
@@ -140,15 +157,15 @@ if __name__ == '__main__':
         for lookback in range(3, 4):
             for embedding_size in [128]:
                 for theta in np.arange(0.5, 0.6, 0.1):
-                    timestamp = lookback
+                    timestamp = 1
                     MAP_all = []
 
                     # 划分不同组输入 - lookback * 2 + 1
                     # for i in range(x_list.size()[0] - lookback * 2 + 1):
-                    for i in range(x_list.size()[0] - lookback * 2 + 1):
+                    for i in range(x_list.size()[0] - lookback - timestamp + 1):
                         encoder = Encoder(in_channels=x_list.size()[1], out_channels=embedding_size).to(device)
                         mllstm = MLLSTM(input_dim=embedding_size, output_dim=embedding_size, n_units=[300, 300]).to(device)
-                        model = Model(encoder=encoder, mllstm=mllstm, timestep=timestamp).to(device)
+                        model = Model(encoder=encoder, mllstm=mllstm, tau=0.5, timestep=timestamp).to(device)
                         optimizer = torch.optim.Adam(
                             model.parameters(), lr=0.001, weight_decay=0.0001)
                         start = t()
@@ -158,7 +175,7 @@ if __name__ == '__main__':
                         for j in range(lookback):
                             edge_index_input[j] = edge_index_list[i + j]
                         model.train()
-                        for epoch in range(1, 51):
+                        for epoch in range(1, 251):
                             optimizer.zero_grad()
                             loss, _ = train(model, x_input, edge_index_input)
                             loss.backward()
@@ -202,8 +219,8 @@ if __name__ == '__main__':
                     result['mean_MAP'] = mean_MAP
                     for i in range(timestamp):
                         print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(mean_MAP[i]))
-                    csv_path = 'result2.0/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(
-                    embedding_size) + ',theta=' + str(theta) + '.csv'
-                    # csv_path = 'result2.0/pred_one/' + data + '.csv'
+                    # csv_path = 'result2.0/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(
+                    # embedding_size) + ',theta=' + str(theta) + '.csv'
+                    csv_path = 'result2.0/pred_one/' + data + '.csv'
                     df = pd.DataFrame(result, index=label)
                     df.to_csv(csv_path)
