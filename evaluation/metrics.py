@@ -43,7 +43,10 @@ def computeMAP(predicted_edge_list, true_graph, max_k=-1):
             node_AP[i] = 0
         else:
             node_AP[i] = float(sum(precision_rectified) / sum(delta_factors))
-    return sum(node_AP) / count
+    if len(precision_scores) > 19:
+        return sum(node_AP) / count, precision_scores[19]
+    else:
+        return sum(node_AP) / count, 0
 
 
 def checkedges(edge_list, e):

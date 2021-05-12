@@ -12,7 +12,7 @@ import pandas as pd
 
 
 class Model(torch.nn.Module):
-    def __init__(self, encoder: Encoder, mllstm: MLLSTM, timestep, tau, activation = torch.sigmoid):
+    def __init__(self, encoder: Encoder, mllstm: MLLSTM, timestep, tau, activation=torch.sigmoid):
         super(Model, self).__init__()
         self.encoder = encoder
         self.mllstm = mllstm
@@ -23,12 +23,16 @@ class Model(torch.nn.Module):
         self.activation = activation
 
     def forward(self, x: torch.tensor, edge_index: dict, link_pred: bool):
-        # x是所有时间片的集合
+        # x是当前输入时间片的集合
         nodes_num = x.size()[1]
-        x_encoded = torch.empty(x.size()[0], x.size()[1], encoder.output_dim).to(device)
-        for i in range(x.size()[0]):
-            x_encoded[i] = self.encoder(x[i], edge_index[i])
-        _, ct = self.mllstm(x_encoded[:])
+        if self.encoder is None:
+            x_encoded = x
+        else:
+            x_encoded = torch.empty(x.size()[0], x.size()[1], encoder.output_dim).to(device)
+            for i in range(x.size()[0]):
+                x_encoded[i] = self.encoder(x[i], edge_index[i])
+        # _, ct = self.mllstm(x_encoded[:])
+        ct = torch.mean(x_encoded, dim=0)
         if link_pred:
             pred = torch.empty((self.timestep, nodes_num, nodes_num)).to(device)
         else:
@@ -43,34 +47,44 @@ class Model(torch.nn.Module):
 
     def semi_loss(self, z1, z2):
         f = lambda x: torch.exp(x / self.tau)
-        between_sim = f(torch.mm(z1, z2.t()))
-        # pos = between_sim.diag()
-        # res = torch.zeros(pos.size())
-        # for i in range(pos.size()[0]):
-        #     node_indices = np.append(np.arange(0, i), np.arange(i + 1, z1.size()[0]))
-        #     np.random.shuffle(node_indices)
-        #     node_indices = node_indices[:len(node_indices) // 10]
-        #     res[i] = pos[i] / (between_sim[i, node_indices].sum(0) + pos[i])
-
-        # a = between_sim.diag()
-        # b = between_sim.sum(1)
-        # c = z1.detach().numpy()
-        # d = z2.detach().numpy()
-        # e = between_sim.detach().numpy()
-        # ret_temp = -torch.log(a / b).detach().numpy()
-        # a = a.detach().numpy()
-        # b = b.detach().numpy()
-        # for i in range(ret_temp.shape[0]):
-        #     if np.isnan(ret_temp[i]):
-        #         a = a[i]
-        #         b = b[i]
-        #         c = c[i]
-        #         d = d[i]
-        #         e = e[i]
-        #         f = np.dot(c, d)
-        #         print('1')
+        if exp_flag:
+            between_sim = f(torch.mm(z1, z2.t()))
+            # pos = between_sim.diag()
+            # res = torch.zeros(pos.size())
+            # for i in range(pos.size()[0]):
+            #     node_indices = np.append(np.arange(0, i), np.arange(i + 1, z1.size()[0]))
+            #     np.random.shuffle(node_indices)
+            #     node_indices = node_indices[:len(node_indices) // 10]
+            #     res[i] = pos[i] / (between_sim[i, node_indices].sum(0) + pos[i])
+        else:
+            between_sim = torch.mm(z1, z2.t())
+            between_sim_temp = torch.ones(between_sim.shape).to(device)
+            between_sim = torch.where(between_sim < 1, between_sim_temp, between_sim)
+            # sum_temp = between_sim.sum(0)
+            # sum_temp_ones = torch.ones(sum_temp.shape).to(device)
+            # sum_temp = torch.where(sum_temp < 1, sum_temp_ones, sum_temp)
+            # diag_temp = between_sim.diag()
+            # diag_temp_ones = torch.ones(diag_temp.shape).to(device)
+            # diag_temp = torch.where(diag_temp < 1, diag_temp_ones, diag_temp)
+            # a = between_sim.diag()
+            # b = between_sim.sum(0)
+            # c = z1.detach().numpy()
+            # d = z2.detach().numpy()
+            # e = between_sim.detach().numpy()
+            # ret_temp = -torch.log(a / b).detach().numpy()
+            # a = a.detach().numpy()
+            # b = b.detach().numpy()
+            # for i in range(ret_temp.shape[0]):
+            #     if np.isnan(ret_temp[i]):
+            #         a = a[i]
+            #         b = b[i]
+            #         c = c[i]
+            #         d = d[i]
+            #         e = e[i]
+            #         f = np.dot(c, d)
+            #         print('1')
         return -torch.log(
-            between_sim.diag() / between_sim.sum(1)
+            between_sim.diag() / between_sim.sum(0)
         )
 
     def loss(self, z1, z2, mean: bool = True):
@@ -82,7 +96,11 @@ class Model(torch.nn.Module):
 
 def process(basepath: str):
     edge_list_path = os.listdir(basepath)
-    if 'enron' in basepath:
+    if 'enron_large' in basepath:
+        exp_flag = False
+    else:
+        exp_flag = True
+    if 'enron' in basepath or 'enron_large' in basepath:
         edge_list_path.sort(key=lambda x: int(x[5:-6]))
     elif 'HS11' in basepath or 'primary' in basepath or 'workplace' in basepath or 'fbmessages' in basepath:
         edge_list_path.sort(key=lambda x: int(x[-5:-4]))
@@ -96,17 +114,15 @@ def process(basepath: str):
     for i in range(len(edge_list_path)):
         file = open(os.path.join(basepath, edge_list_path[i]), 'r')
         # 不同的数据文件分隔符不一样
-        if 'primary' in basepath or 'fbmessages' in basepath or 'primary' in basepath or 'workplace' in basepath:
+        if 'primary' in basepath or 'fbmessages' in basepath or 'workplace' in basepath:
             edges = list(y.split(' ')[:2] for y in file.read().split('\n'))[:-1]
+        elif 'enron_large' in basepath:
+            edges = list(y.split(' ')[:2] for y in file.read().split('\n'))
         else:
             edges = list(y.split('\t')[:2] for y in file.read().split('\n'))[:-1]
         for j in range(len(edges)):
             # 将字符的边转为int型
             edges[j] = list(int(z) - 1 for z in edges[j])
-
-        if 'fbmessages' in basepath:
-            if i > 0:
-                edges += edges_list[-1]
 
         # 去除重复的边
         edges = list(set([tuple(t) for t in edges]))
@@ -131,7 +147,7 @@ def process(basepath: str):
             x[i, j, k] = 1
             x[i, k, j] = 1
 
-    return x, edge_index
+    return x, edge_index, exp_flag
 
 
 def train(model: Model, x, edge_index):
@@ -139,7 +155,7 @@ def train(model: Model, x, edge_index):
     loss = torch.zeros(lookback, model.timestep).to(device)
     for i in range(lookback):
         for j in range(model.timestep):
-            loss[i][j] = model.loss(x[i], x_pred[j]) + (lookback - i + j) * theta
+            loss[i][j] = model.loss(x_pred[j], x[i]) + (lookback - i + j) * theta
             if i == j:
                 print('true:', x[i][:8, :8])
                 print('pred:', x_pred[j][:8, :8])
@@ -149,16 +165,21 @@ def train(model: Model, x, edge_index):
 
 if __name__ == '__main__':
     edge_index_list: dict
-    data_list = ['cellphone', 'enron', 'HS11', 'HS12', 'primary', 'workplace']
-        # cellphone, 'enron', 'fbmessages', 'HS11', 'HS12', 'primary', 'workplace']
+    data_list = ['cellphone', 'enron', 'enron_large', 'HS11', 'HS12', 'primary', 'workplace']
+        # 'cellphone', 'enron', 'HS11', 'HS12', 'primary', 'workplace']
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     for data in data_list:
-        x_list, edge_index_list = process('data/' + data)
+        x_list, edge_index_list, exp_flag = process('data/' + data)
+        # for lookback in range(1, len(x_list) // 2 + 1):
         for lookback in range(3, 4):
+            # for embedding_size in [64, 128, 256]:
             for embedding_size in [128]:
+                # for theta in np.arange(0.1, 1.1, 0.1):
                 for theta in np.arange(0.5, 0.6, 0.1):
-                    timestamp = 1
+                    # timestamp = lookback
+                    timestamp = lookback
                     MAP_all = []
+                    precision_k_all = []
 
                     # 划分不同组输入 - lookback * 2 + 1
                     # for i in range(x_list.size()[0] - lookback * 2 + 1):
@@ -192,6 +213,7 @@ if __name__ == '__main__':
 
                         # 预测timestamp范围的MAP值
                         MAP_list = []
+                        precision_k_list = []
                         for j in range(timestamp):
                             adj_reconstruct = evaluation.evaluation_util.graphify(x_pre_list[j].cpu())
                             edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
@@ -199,12 +221,14 @@ if __name__ == '__main__':
                             true_graph = nx.Graph()
                             true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
                             true_graph.add_edges_from(edge_index_list[i + lookback + j].permute(1, 0).cpu().numpy().tolist())
-                            MAP = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
+                            MAP, precision_k = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
                             MAP_list.append(MAP)
+                            precision_k_list.append(precision_k)
                             print('第' + str(i) + '-' + str(i + lookback) + '个时间片的第' + str(j) + '步预测的MAP值为' + str(MAP))
                         print("=== Finish Evaluating ===")
                         # 不同输入组的MAP值
                         MAP_all.append(MAP_list)
+                        precision_k_all.append(precision_k_list)
                     result = {}
                     label = []
                     for i in range(len(MAP_all)):
@@ -221,6 +245,25 @@ if __name__ == '__main__':
                         print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(mean_MAP[i]))
                     # csv_path = 'result2.0/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(
                     # embedding_size) + ',theta=' + str(theta) + '.csv'
-                    csv_path = 'result2.0/pred_one/' + data + '.csv'
+                    csv_path = 'result2.0/pred_one/no_lstm/' + data + '_no.csv'
                     df = pd.DataFrame(result, index=label)
                     df.to_csv(csv_path)
+                    # result = {}
+                    # label = []
+                    # for i in range(len(precision_k_all)):
+                    #     column = '第' + str(i) + '-' + str(i + lookback) + '个时间片'
+                    #     result[column] = precision_k_all[i]
+                    # for j in range(timestamp):
+                    #     row = 'T+' + str(j)
+                    #     label.append(row)
+                    # # 求所有输入组的平均MAP值
+                    # precision_k_all = np.array(precision_k_all)
+                    # mean_precision_k = np.mean(precision_k_all, axis=0).tolist()
+                    # result['mean_precision_k'] = mean_precision_k
+                    # for i in range(timestamp):
+                    #     print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(mean_precision_k[i]))
+                    # # csv_path = 'result2.0/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(
+                    # # embedding_size) + ',theta=' + str(theta) + '.csv'
+                    # csv_path = 'result2.0/pred_one/' + data + '_precision@k_ae.csv'
+                    # df = pd.DataFrame(result, index=label)
+                    # df.to_csv(csv_path)
