@@ -31,8 +31,8 @@ class Model(torch.nn.Module):
             x_encoded = torch.empty(x.size()[0], x.size()[1], encoder.output_dim).to(device)
             for i in range(x.size()[0]):
                 x_encoded[i] = self.encoder(x[i], edge_index[i])
-        # _, ct = self.mllstm(x_encoded[:])
-        ct = torch.mean(x_encoded, dim=0)
+        _, ct = self.mllstm(x_encoded[:])
+        # ct = torch.mean(x_encoded, dim=0)
         if link_pred:
             pred = torch.empty((self.timestep, nodes_num, nodes_num)).to(device)
         else:
@@ -56,10 +56,16 @@ class Model(torch.nn.Module):
             #     np.random.shuffle(node_indices)
             #     node_indices = node_indices[:len(node_indices) // 10]
             #     res[i] = pos[i] / (between_sim[i, node_indices].sum(0) + pos[i])
+            return -torch.log(
+                between_sim.diag() / between_sim.sum(0)
+            )
         else:
             between_sim = torch.mm(z1, z2.t())
-            between_sim_temp = torch.ones(between_sim.shape).to(device)
-            between_sim = torch.where(between_sim < 1, between_sim_temp, between_sim)
+            between_diag = between_sim.diag()
+            between_sum = between_sim.sum(0)
+            index = between_diag.nonzero(as_tuple=True)
+            between_diag = between_diag[index]
+            between_sum = between_sum[index]
             # sum_temp = between_sim.sum(0)
             # sum_temp_ones = torch.ones(sum_temp.shape).to(device)
             # sum_temp = torch.where(sum_temp < 1, sum_temp_ones, sum_temp)
@@ -83,9 +89,7 @@ class Model(torch.nn.Module):
             #         e = e[i]
             #         f = np.dot(c, d)
             #         print('1')
-        return -torch.log(
-            between_sim.diag() / between_sim.sum(0)
-        )
+            return -between_diag / between_sum
 
     def loss(self, z1, z2, mean: bool = True):
         ret = self.semi_loss(z1, z2)
@@ -96,11 +100,14 @@ class Model(torch.nn.Module):
 
 def process(basepath: str):
     edge_list_path = os.listdir(basepath)
-    if 'enron_large' in basepath:
+    if 'enron_all' in basepath:
         exp_flag = False
     else:
         exp_flag = True
-    if 'enron' in basepath or 'enron_large' in basepath:
+    exp_flag = False
+    if 'all' in basepath or 'msg' in basepath or 'bitcoin' in basepath:
+        edge_list_path.sort(key=lambda x: int(x[8:-6]))
+    elif 'enron' in basepath:
         edge_list_path.sort(key=lambda x: int(x[5:-6]))
     elif 'HS11' in basepath or 'primary' in basepath or 'workplace' in basepath or 'fbmessages' in basepath:
         edge_list_path.sort(key=lambda x: int(x[-5:-4]))
@@ -114,7 +121,7 @@ def process(basepath: str):
     for i in range(len(edge_list_path)):
         file = open(os.path.join(basepath, edge_list_path[i]), 'r')
         # 不同的数据文件分隔符不一样
-        if 'primary' in basepath or 'fbmessages' in basepath or 'workplace' in basepath:
+        if 'primary' in basepath or 'fbmessages' in basepath or 'workplace' in basepath or 'all' in basepath or 'msg' in basepath or 'bitcoin' in basepath:
             edges = list(y.split(' ')[:2] for y in file.read().split('\n'))[:-1]
         elif 'enron_large' in basepath:
             edges = list(y.split(' ')[:2] for y in file.read().split('\n'))
@@ -165,8 +172,8 @@ def train(model: Model, x, edge_index):
 
 if __name__ == '__main__':
     edge_index_list: dict
-    data_list = ['cellphone', 'enron', 'enron_large', 'HS11', 'HS12', 'primary', 'workplace']
-        # 'cellphone', 'enron', 'HS11', 'HS12', 'primary', 'workplace']
+    # data_list = ['cellphone', 'enron', 'enron_large', 'HS11', 'HS12', 'primary', 'workplace']
+    data_list = ['bitcoin_alpha', 'bitcoin_otc', 'college_msg', 'enron_all', 'enron_all_shuffle']
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     for data in data_list:
         x_list, edge_index_list, exp_flag = process('data/' + data)
@@ -177,7 +184,7 @@ if __name__ == '__main__':
                 # for theta in np.arange(0.1, 1.1, 0.1):
                 for theta in np.arange(0.5, 0.6, 0.1):
                     # timestamp = lookback
-                    timestamp = lookback
+                    timestamp = 1
                     MAP_all = []
                     precision_k_all = []
 
@@ -245,7 +252,7 @@ if __name__ == '__main__':
                         print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(mean_MAP[i]))
                     # csv_path = 'result2.0/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(
                     # embedding_size) + ',theta=' + str(theta) + '.csv'
-                    csv_path = 'result2.0/pred_one/no_lstm/' + data + '_no.csv'
+                    csv_path = 'result2.0/pred_one/' + data + '.csv'
                     df = pd.DataFrame(result, index=label)
                     df.to_csv(csv_path)
                     # result = {}
