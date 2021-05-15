@@ -4,7 +4,7 @@ from torch_geometric.nn import GCNConv
 
 
 class Encoder(torch.nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, activation=torch.rrelu,
+    def __init__(self, in_channels: int, out_channels: int, activation=torch.sigmoid,
                  base_model=GCNConv, k: int = 2):
         super(Encoder, self).__init__()
         self.base_model = base_model
@@ -24,4 +24,5 @@ class Encoder(torch.nn.Module):
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor):
         for i in range(self.k):
             x = self.conv[i](x, edge_index)
+            x = self.activation(x)
         return x

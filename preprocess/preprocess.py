@@ -24,12 +24,16 @@ def preprocess_bitcoin_otc():
     snap_candidate = ['2011-05', '2011-11', '2012-05', '2012-11', '2013-05',
                       '2013-11', '2016-01']
 
+    nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True).unique()
+    node_dataframe = pd.DataFrame(nodes_set, columns=['node'])
     for i in range(len(snap_candidate)):
-        if i < 1:
+        if i < 3:
             tem = dataframe[['source', 'target']][dataframe['timestamp'] <= snap_candidate[i]]
         else:
             tem = dataframe[['source', 'target']][
-                (dataframe['timestamp'] <= snap_candidate[i]) & (dataframe['timestamp'] > snap_candidate[i - 1])]
+                (dataframe['timestamp'] <= snap_candidate[i]) & (dataframe['timestamp'] >= snap_candidate[i - 3])]
+        tem['source'] = tem['source'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
+        tem['target'] = tem['target'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
         print(i, ':', len(tem))
         tem.to_csv('../data/bitcoin_otc/snapshot' + str(i) + ".edges", sep=' ', header=0, index=0)
 
@@ -57,12 +61,16 @@ def preprocess_bitcoin_alpha():
     snap_candidate = ['2011-05', '2011-11', '2012-05', '2012-11', '2013-05',
                       '2013-11', '2016-01']
 
+    nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True).unique()
+    node_dataframe = pd.DataFrame(nodes_set, columns=['node'])
     for i in range(len(snap_candidate)):
         if i < 1:
             tem = dataframe[['source', 'target']][dataframe['timestamp'] <= snap_candidate[i]]
         else:
             tem = dataframe[['source', 'target']][
                 (dataframe['timestamp'] <= snap_candidate[i]) & (dataframe['timestamp'] > snap_candidate[i - 1])]
+        tem['source'] = tem['source'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
+        tem['target'] = tem['target'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
         print(i, ':', len(tem))
         tem.to_csv('../data/bitcoin_alpha/snapshot' + str(i) + ".edges", sep=' ', header=0, index=0)
 
@@ -79,12 +87,16 @@ def preprocess_college_msg():
     dataframe.sort_values(['timestamp'], inplace=True, ignore_index=True)
     snap_candidate = ['2004-04-30', '2004-05-06', '2004-05-11', '2004-05-16', '2004-05-21', '2004-05-26',
                       '2004-05-31', '2004-06-30', '2004-07-31', '2004-10-31']
+    nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True).unique()
+    node_dataframe = pd.DataFrame(nodes_set, columns=['node'])
     for i in range(len(snap_candidate)):
         if i < 1:
             tem = dataframe[['source', 'target']][dataframe['timestamp'] <= snap_candidate[i]]
         else:
             tem = dataframe[['source', 'target']][
                 (dataframe['timestamp'] <= snap_candidate[i]) & (dataframe['timestamp'] > snap_candidate[i - 1])]
+        tem['source'] = tem['source'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
+        tem['target'] = tem['target'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
         print(i, ':', len(tem))
         tem.to_csv('../data/college_msg/snapshot' + str(i) + ".edges", sep=' ', header=0, index=0)
 
@@ -112,4 +124,4 @@ def preprocess_enron_all():
 
 
 if __name__ == '__main__':
-    preprocess_enron_all()
+    preprocess_bitcoin_otc()
