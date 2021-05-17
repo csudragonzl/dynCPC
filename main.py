@@ -19,7 +19,7 @@ class Model(torch.nn.Module):
         # timestep是预测的时间步长
         self.timestep = timestep
         self.tau = tau
-        self.Wk = nn.ModuleList([nn.Linear(mllstm.output_dim, encoder.input_dim, bias=False) for i in range(timestep)])
+        self.Wk = nn.ModuleList([nn.Linear(mllstm.output_dim, mllstm.input_dim, bias=False) for i in range(timestep)])
         self.beta = beta
         self.rho = rho
         self.activation = activation
@@ -45,7 +45,7 @@ class Model(torch.nn.Module):
                 pred[i] = self.activation(linear(ct))
             else:
                 pred[i] = linear(ct)
-        return pred
+        return x_encoded, pred
 
     def semi_loss(self, z1, z2):
         f = lambda x: torch.exp(x / self.tau)
@@ -59,8 +59,8 @@ class Model(torch.nn.Module):
             z2 = z2[:, index]
             between_sim = torch.zeros(z1.shape).to(device)
             for i in range(between_sim.shape[0]):
-                # between_sim[i] = torch.cosine_similarity(z1[i], z2, dim=0) / self.tau
-                between_sim[i] = torch.pairwise_distance(z1[i], z2, p=1) / self.tau
+                between_sim[i] = torch.cosine_similarity(z1[i], z2, dim=0) / self.tau
+                # between_sim[i] = torch.pairwise_distance(z1[i], z2, p=1) / self.tau
         # between_sim = f(torch.mm(z1[index], z2[index].t()))
         # else:
         #     between_sim = torch.mm(z1, z2.t())
@@ -94,7 +94,7 @@ def process(basepath: str):
         exp_flag = False
     else:
         exp_flag = True
-    exp_flag = False
+    exp_flag = True
     if 'all' in basepath or 'msg' in basepath or 'bitcoin' in basepath:
         edge_list_path.sort(key=lambda x: int(x[8:-6]))
     elif 'enron' in basepath:
@@ -148,11 +148,11 @@ def process(basepath: str):
 
 
 def train(model: Model, x, edge_index):
-    x_pred = model(x, edge_index, True)
+    x_encoded, x_pred = model(x, edge_index, True)
     loss = torch.zeros(lookback, model.timestep).to(device)
     for i in range(lookback):
         for j in range(model.timestep):
-            loss[i][j] = model.loss(x_pred[j], x[i]) + (lookback - i + j) * theta
+            loss[i][j] = model.loss(x_pred[j], x_encoded[i]) + (lookback - i + j) * theta
             if i == j:
                 print('true:', x[i][:8, :8])
                 print('pred:', x_pred[j][:8, :8])
