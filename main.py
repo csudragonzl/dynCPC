@@ -28,31 +28,31 @@ class Model(torch.nn.Module):
         # x是当前输入时间片的集合
         nodes_num = x.size()[1]
         if self.encoder is None:
-            x_encoded = x
+            x_encoded_list = x
         else:
-            x_encoded = torch.empty(x.size()[0], x.size()[1], encoder.output_dim).to(device)
+            x_encoded_list = torch.empty(x.size()[0], x.size()[1], encoder.output_dim).to(device)
             for i in range(x.size()[0]):
-                x_encoded[i] = self.encoder(x[i], edge_index[i])
-        _, ct = self.mllstm(x_encoded[:])
+                x_encoded_list[i] = self.encoder(x[i], edge_index[i])
+        _, ct = self.mllstm(x_encoded_list[:])
         # ct = torch.mean(x_encoded, dim=0)
         if link_pred:
-            pred = torch.empty((self.timestep, nodes_num, nodes_num)).to(device)
+            x_pred_list = torch.empty((self.timestep, x.size()[1], encoder.output_dim)).to(device)
         else:
-            pred = torch.empty((self.timestep, nodes_num, mllstm.output_dim)).to(device)
+            x_pred_list = torch.empty((self.timestep, nodes_num, mllstm.output_dim)).to(device)
         for i in np.arange(0, self.timestep):
             linear = self.Wk[i]
             if link_pred:
-                pred[i] = self.activation(linear(ct))
+                x_pred_list[i] = self.activation(linear(ct))
             else:
-                pred[i] = linear(ct)
-        return x_encoded, pred
+                x_pred_list[i] = linear(ct)
+        return x_encoded_list, x_pred_list
 
     def semi_loss(self, z1, z2):
         f = lambda x: torch.exp(x / self.tau)
         if exp_flag:
             between_sim = f(torch.mm(z1, z2.t()))
         else:
-            index = torch.nonzero(z2.sum(0), as_tuple=True)[0]
+            index = z2.sum(0) > 0
             z1 = z1[index]
             z1 = z1[:, index]
             z2 = z2[index]
@@ -77,15 +77,28 @@ class Model(torch.nn.Module):
             between_sim.diag() / between_sim.sum(0) * between_sim.size()[0]
         )
 
-    def loss(self, z1, z2, mean: bool = True):
-        ret = self.semi_loss(z1, z2)
-        ret = ret.mean() if mean else ret.sum()
+    def contrast_loss(self, x_pred, x_encoded, mean: bool = True):
+        info_nce_loss = self.semi_loss(x_pred, x_encoded)
+        info_nce_loss = info_nce_loss.mean() if mean else info_nce_loss.sum()
 
-        rhohats = z1.t().mean(axis=0)
-        kl = torch.mean(self.rho * torch.log(self.rho / rhohats) + (1 - self.rho) * torch.log(((1 - self.rho) / (1 - rhohats))))
-        kl_loss = self.beta * kl
+        # rhohats = z1.t().mean(axis=0)
+        # kl = torch.mean(self.rho * torch.log(self.rho / rhohats) + (1 - self.rho) * torch.log(((1 - self.rho) / (1 - rhohats))))
+        # kl_loss = self.beta * kl
 
-        return ret + kl_loss
+        return info_nce_loss
+
+    def reconstruct_loss(self, x_encoded, x_true, b):
+        return torch.mean(torch.sum(torch.square((torch.sigmoid(torch.mm(x_encoded, x_encoded.t())) - x_true) * b), dim=1))
+
+    def loss(self, x_pred_list, x_encoded_list, x_true):
+        contrast_loss = torch.zeros(lookback, self.timestep).to(device)
+        reconstruct_loss = torch.zeros(lookback).to(device)
+        for i in range(lookback):
+            b = x_true[i][x_true[i] > 0] = 5
+            reconstruct_loss[i] = self.reconstruct_loss(x_encoded_list[i], x_true[i], b)
+            for j in range(self.timestep):
+                loss[i][j] = self.contrast_loss(x_pred_list[j], x_encoded_list[i]) + (lookback - i + j) * theta
+        return contrast_loss.sum() + reconstruct_loss.sum()
 
 
 def process(basepath: str):
@@ -148,16 +161,10 @@ def process(basepath: str):
 
 
 def train(model: Model, x, edge_index):
-    x_encoded, x_pred = model(x, edge_index, True)
-    loss = torch.zeros(lookback, model.timestep).to(device)
-    for i in range(lookback):
-        for j in range(model.timestep):
-            loss[i][j] = model.loss(x_pred[j], x_encoded[i]) + (lookback - i + j) * theta
-            if i == j:
-                print('true:', x[i][:8, :8])
-                print('pred:', x_pred[j][:8, :8])
+    x_encoded_list, x_pred_list = model(x, edge_index, True)
+    loss = model.loss(x_pred_list, x_encoded_list, x)
 
-    return loss.sum(), x_pred
+    return loss, x_pred_list
 
 
 if __name__ == '__main__':
@@ -196,9 +203,9 @@ if __name__ == '__main__':
                                 for j in range(lookback):
                                     edge_index_input[j] = edge_index_list[i + j]
                                 model.train()
-                                for epoch in range(1, 251):
+                                for epoch in range(1, 2):
                                     optimizer.zero_grad()
-                                    loss, _ = train(model, x_input, edge_index_input)
+                                    loss, x_pred_list = train(model, x_input, edge_index_input)
                                     loss.backward()
                                     optimizer.step()
 
@@ -206,6 +213,17 @@ if __name__ == '__main__':
                                     print(f'(T) | Epoch={epoch:03d}, loss={loss:.4f}, '
                                           f'this epoch {now - prev:.4f}, total {now - start:.4f}')
                                     prev = now
+                                    for j in range(timestamp):
+                                        adj_reconstruct = torch.sigmoid(torch.mm(x_pred_list[j], x_pred_list[j].t()).cpu())
+                                        adj_reconstruct = evaluation.evaluation_util.graphify(adj_reconstruct)
+                                        edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
+                                        print('预测得到的边数为', len(edge_index_pre))
+                                        true_graph = nx.Graph()
+                                        true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
+                                        true_graph.add_edges_from(
+                                            edge_index_list[i + lookback + j].permute(1, 0).cpu().numpy().tolist())
+                                        MAP, precision_k = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
+                                        print('MAP值为：', MAP)
 
                                 print("=== Finish Training ===")
                                 model.eval()
@@ -215,7 +233,8 @@ if __name__ == '__main__':
                                 MAP_list = []
                                 precision_k_list = []
                                 for j in range(timestamp):
-                                    adj_reconstruct = evaluation.evaluation_util.graphify(x_pre_list[j].cpu())
+                                    adj_reconstruct = torch.sigmoid(torch.mm(x_pred_list[j], x_pred_list[j].t()).cpu())
+                                    adj_reconstruct = evaluation.evaluation_util.graphify(adj_reconstruct)
                                     edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
                                     print('预测得到的边数为', len(edge_index_pre))
                                     true_graph = nx.Graph()
