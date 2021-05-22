@@ -94,10 +94,11 @@ class Model(torch.nn.Module):
         contrast_loss = torch.zeros(lookback, self.timestep).to(device)
         reconstruct_loss = torch.zeros(lookback).to(device)
         for i in range(lookback):
-            b = x_true[i][x_true[i] > 0] = 5
+            b = x_true[i]
+            b = torch.where(b > 0, b * 5, b)
             reconstruct_loss[i] = self.reconstruct_loss(x_encoded_list[i], x_true[i], b)
             for j in range(self.timestep):
-                loss[i][j] = self.contrast_loss(x_pred_list[j], x_encoded_list[i]) + (lookback - i + j) * theta
+                contrast_loss[i][j] = self.contrast_loss(x_pred_list[j], x_encoded_list[i]) + (lookback - i + j) * theta
         return contrast_loss.sum() + reconstruct_loss.sum()
 
 
@@ -203,7 +204,7 @@ if __name__ == '__main__':
                                 for j in range(lookback):
                                     edge_index_input[j] = edge_index_list[i + j]
                                 model.train()
-                                for epoch in range(1, 2):
+                                for epoch in range(1, 251):
                                     optimizer.zero_grad()
                                     loss, x_pred_list = train(model, x_input, edge_index_input)
                                     loss.backward()
@@ -218,6 +219,7 @@ if __name__ == '__main__':
                                         adj_reconstruct = evaluation.evaluation_util.graphify(adj_reconstruct)
                                         edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
                                         print('预测得到的边数为', len(edge_index_pre))
+                                        print(adj_reconstruct[:8, :8])
                                         true_graph = nx.Graph()
                                         true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
                                         true_graph.add_edges_from(
