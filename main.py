@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from model.gcn_encoder import Encoder
+from model.encoder import Encoder
 from model.lstm import MLLSTM
 import os
 from time import perf_counter as t
@@ -12,7 +12,7 @@ import pandas as pd
 
 
 class Model(torch.nn.Module):
-    def __init__(self, encoder: Encoder, mllstm: MLLSTM, timestep, tau, beta, rho, activation=torch.sigmoid):
+    def __init__(self, encoder: Encoder, mllstm: MLLSTM, timestep, tau, activation=torch.sigmoid):
         super(Model, self).__init__()
         self.encoder = encoder
         self.mllstm = mllstm
@@ -20,8 +20,6 @@ class Model(torch.nn.Module):
         self.timestep = timestep
         self.tau = tau
         self.Wk = nn.ModuleList([nn.Linear(mllstm.output_dim, mllstm.input_dim, bias=False) for i in range(timestep)])
-        self.beta = beta
-        self.rho = rho
         self.activation = activation
 
     def forward(self, x: torch.tensor, edge_index: dict, link_pred: bool):
@@ -95,11 +93,11 @@ class Model(torch.nn.Module):
         reconstruct_loss = torch.zeros(lookback).to(device)
         for i in range(lookback):
             b = x_true[i]
-            b = torch.where(b > 0, b * 5, b)
+            b = torch.where(b > 0, b * 5, b + 1)
             reconstruct_loss[i] = self.reconstruct_loss(x_encoded_list[i], x_true[i], b)
             for j in range(self.timestep):
                 contrast_loss[i][j] = self.contrast_loss(x_pred_list[j], x_encoded_list[i]) + (lookback - i + j) * theta
-        return contrast_loss.sum() + reconstruct_loss.sum()
+        return contrast_loss.sum() + reconstruct_loss.sum() * 0.001
 
 
 def process(basepath: str):
@@ -182,109 +180,107 @@ if __name__ == '__main__':
             for embedding_size in [128]:
                 # for theta in np.arange(0.1, 1.1, 0.1):
                 for theta in np.arange(0.5, 0.6, 0.1):
-                    for beta in np.arange(0.1, 1.1, 0.1):
-                        for rho in np.arange(0.1, 1.1, 0.1):
-                            # timestamp = lookback
-                            timestamp = 1
-                            MAP_all = []
-                            precision_k_all = []
+                    # timestamp = lookback
+                    timestamp = 1
+                    MAP_all = []
+                    precision_k_all = []
 
-                            # 划分不同组输入 - lookback * 2 + 1
-                            # for i in range(x_list.size()[0] - lookback * 2 + 1):
-                            for i in range(x_list.size()[0] - lookback - timestamp + 1):
-                                encoder = Encoder(in_channels=x_list.size()[1], out_channels=embedding_size).to(device)
-                                mllstm = MLLSTM(input_dim=embedding_size, output_dim=embedding_size, n_units=[300, 300]).to(device)
-                                model = Model(encoder=encoder, mllstm=mllstm, timestep=timestamp, tau=0.5, beta=beta, rho=rho).to(device)
-                                optimizer = torch.optim.Adam(
-                                    model.parameters(), lr=0.001, weight_decay=0.0001)
-                                start = t()
-                                prev = start
-                                x_input = x_list[i:i+lookback]
-                                edge_index_input = {}
-                                for j in range(lookback):
-                                    edge_index_input[j] = edge_index_list[i + j]
-                                model.train()
-                                for epoch in range(1, 251):
-                                    optimizer.zero_grad()
-                                    loss, x_pred_list = train(model, x_input, edge_index_input)
-                                    loss.backward()
-                                    optimizer.step()
+                    # 划分不同组输入 - lookback * 2 + 1
+                    # for i in range(x_list.size()[0] - lookback * 2 + 1):
+                    for i in range(x_list.size()[0] - lookback - timestamp + 1):
+                        encoder = Encoder(input_dim=x_list.size()[1], output_dim=embedding_size).to(device)
+                        mllstm = MLLSTM(input_dim=embedding_size, output_dim=embedding_size, n_units=[300, 300]).to(device)
+                        model = Model(encoder=encoder, mllstm=mllstm, timestep=timestamp, tau=1.0).to(device)
+                        optimizer = torch.optim.Adam(
+                            model.parameters(), lr=0.001, weight_decay=0.0001)
+                        start = t()
+                        prev = start
+                        x_input = x_list[i:i+lookback]
+                        edge_index_input = {}
+                        for j in range(lookback):
+                            edge_index_input[j] = edge_index_list[i + j]
+                        model.train()
+                        for epoch in range(1, 251):
+                            optimizer.zero_grad()
+                            loss, x_pred_list = train(model, x_input, edge_index_input)
+                            loss.backward()
+                            optimizer.step()
 
-                                    now = t()
-                                    print(f'(T) | Epoch={epoch:03d}, loss={loss:.4f}, '
-                                          f'this epoch {now - prev:.4f}, total {now - start:.4f}')
-                                    prev = now
-                                    for j in range(timestamp):
-                                        adj_reconstruct = torch.sigmoid(torch.mm(x_pred_list[j], x_pred_list[j].t()).cpu())
-                                        adj_reconstruct = evaluation.evaluation_util.graphify(adj_reconstruct)
-                                        edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
-                                        print('预测得到的边数为', len(edge_index_pre))
-                                        print(adj_reconstruct[:8, :8])
-                                        true_graph = nx.Graph()
-                                        true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
-                                        true_graph.add_edges_from(
-                                            edge_index_list[i + lookback + j].permute(1, 0).cpu().numpy().tolist())
-                                        MAP, precision_k = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
-                                        print('MAP值为：', MAP)
-
-                                print("=== Finish Training ===")
-                                model.eval()
-                                _, x_pre_list = train(model, x_input, edge_index_input)
-
-                                # 预测timestamp范围的MAP值
-                                MAP_list = []
-                                precision_k_list = []
-                                for j in range(timestamp):
-                                    adj_reconstruct = torch.sigmoid(torch.mm(x_pred_list[j], x_pred_list[j].t()).cpu())
-                                    adj_reconstruct = evaluation.evaluation_util.graphify(adj_reconstruct)
-                                    edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
-                                    print('预测得到的边数为', len(edge_index_pre))
-                                    true_graph = nx.Graph()
-                                    true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
-                                    true_graph.add_edges_from(edge_index_list[i + lookback + j].permute(1, 0).cpu().numpy().tolist())
-                                    MAP, precision_k = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
-                                    MAP_list.append(MAP)
-                                    precision_k_list.append(precision_k)
-                                    print('第' + str(i) + '-' + str(i + lookback) + '个时间片的第' + str(j) + '步预测的MAP值为' + str(MAP))
-                                print("=== Finish Evaluating ===")
-                                # 不同输入组的MAP值
-                                MAP_all.append(MAP_list)
-                                precision_k_all.append(precision_k_list)
-                            result = {}
-                            label = []
-                            for i in range(len(MAP_all)):
-                                column = '第' + str(i) + '-' + str(i + lookback) + '个时间片'
-                                result[column] = MAP_all[i]
+                            now = t()
+                            print(f'(T) | Epoch={epoch:03d}, loss={loss:.4f}, '
+                                  f'this epoch {now - prev:.4f}, total {now - start:.4f}')
+                            prev = now
                             for j in range(timestamp):
-                                row = 'T+' + str(j)
-                                label.append(row)
-                            # 求所有输入组的平均MAP值
-                            MAP_all = np.array(MAP_all)
-                            mean_MAP = np.mean(MAP_all, axis=0).tolist()
-                            result['mean_MAP'] = mean_MAP
-                            for i in range(timestamp):
-                                print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(mean_MAP[i]))
-                            # csv_path = 'result2.0/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(
-                            # embedding_size) + ',theta=' + str(theta) + '.csv'
-                            csv_path = 'result2.0/pred_one/rho_analysis/' + data + ',beta=' + str(beta) + ',rho=' + str(rho) + '.csv'
-                            df = pd.DataFrame(result, index=label)
-                            df.to_csv(csv_path)
-                            # result = {}
-                            # label = []
-                            # for i in range(len(precision_k_all)):
-                            #     column = '第' + str(i) + '-' + str(i + lookback) + '个时间片'
-                            #     result[column] = precision_k_all[i]
-                            # for j in range(timestamp):
-                            #     row = 'T+' + str(j)
-                            #     label.append(row)
-                            # # 求所有输入组的平均MAP值
-                            # precision_k_all = np.array(precision_k_all)
-                            # mean_precision_k = np.mean(precision_k_all, axis=0).tolist()
-                            # result['mean_precision_k'] = mean_precision_k
-                            # for i in range(timestamp):
-                            #     print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(mean_precision_k[i]))
-                            # # csv_path = 'result2.0/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(
-                            # # embedding_size) + ',theta=' + str(theta) + '.csv'
-                            # csv_path = 'result2.0/pred_one/' + data + '_precision@k_ae.csv'
-                            # df = pd.DataFrame(result, index=label)
-                            # df.to_csv(csv_path)
+                                adj_reconstruct = torch.sigmoid(torch.mm(x_pred_list[j], x_pred_list[j].t()).cpu())
+                                adj_reconstruct = evaluation.evaluation_util.graphify(adj_reconstruct)
+                                edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
+                                print('预测得到的边数为', len(edge_index_pre))
+                                print(adj_reconstruct[:8, :8])
+                                true_graph = nx.Graph()
+                                true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
+                                true_graph.add_edges_from(
+                                    edge_index_list[i + lookback + j].permute(1, 0).cpu().numpy().tolist())
+                                MAP, precision_k = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
+                                print('MAP值为：', MAP)
+
+                        print("=== Finish Training ===")
+                        model.eval()
+                        _, x_pre_list = train(model, x_input, edge_index_input)
+
+                        # 预测timestamp范围的MAP值
+                        MAP_list = []
+                        precision_k_list = []
+                        for j in range(timestamp):
+                            adj_reconstruct = torch.sigmoid(torch.mm(x_pred_list[j], x_pred_list[j].t()).cpu())
+                            adj_reconstruct = evaluation.evaluation_util.graphify(adj_reconstruct)
+                            edge_index_pre = evaluation.evaluation_util.getEdgeListFromAdj(adj=adj_reconstruct)
+                            print('预测得到的边数为', len(edge_index_pre))
+                            true_graph = nx.Graph()
+                            true_graph.add_nodes_from([i for i in range(x_list.size()[1])])
+                            true_graph.add_edges_from(edge_index_list[i + lookback + j].permute(1, 0).cpu().numpy().tolist())
+                            MAP, precision_k = evaluation.metrics.computeMAP(edge_index_pre, true_graph)
+                            MAP_list.append(MAP)
+                            precision_k_list.append(precision_k)
+                            print('第' + str(i) + '-' + str(i + lookback) + '个时间片的第' + str(j) + '步预测的MAP值为' + str(MAP))
+                        print("=== Finish Evaluating ===")
+                        # 不同输入组的MAP值
+                        MAP_all.append(MAP_list)
+                        precision_k_all.append(precision_k_list)
+                    result = {}
+                    label = []
+                    for i in range(len(MAP_all)):
+                        column = '第' + str(i) + '-' + str(i + lookback) + '个时间片'
+                        result[column] = MAP_all[i]
+                    for j in range(timestamp):
+                        row = 'T+' + str(j)
+                        label.append(row)
+                    # 求所有输入组的平均MAP值
+                    MAP_all = np.array(MAP_all)
+                    mean_MAP = np.mean(MAP_all, axis=0).tolist()
+                    result['mean_MAP'] = mean_MAP
+                    for i in range(timestamp):
+                        print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(mean_MAP[i]))
+                    # csv_path = 'result2.0/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(
+                    # embedding_size) + ',theta=' + str(theta) + '.csv'
+                    csv_path = 'result2.0/pred_one' + data + '.csv'
+                    df = pd.DataFrame(result, index=label)
+                    df.to_csv(csv_path)
+                    # result = {}
+                    # label = []
+                    # for i in range(len(precision_k_all)):
+                    #     column = '第' + str(i) + '-' + str(i + lookback) + '个时间片'
+                    #     result[column] = precision_k_all[i]
+                    # for j in range(timestamp):
+                    #     row = 'T+' + str(j)
+                    #     label.append(row)
+                    # # 求所有输入组的平均MAP值
+                    # precision_k_all = np.array(precision_k_all)
+                    # mean_precision_k = np.mean(precision_k_all, axis=0).tolist()
+                    # result['mean_precision_k'] = mean_precision_k
+                    # for i in range(timestamp):
+                    #     print('预测未来第' + str(i) + '个时间片的mean MAP score is ' + str(mean_precision_k[i]))
+                    # # csv_path = 'result2.0/' + data + '/' + 'lookback=' + str(lookback) + ',embsize=' + str(
+                    # # embedding_size) + ',theta=' + str(theta) + '.csv'
+                    # csv_path = 'result2.0/pred_one/' + data + '_precision@k_ae.csv'
+                    # df = pd.DataFrame(result, index=label)
+                    # df.to_csv(csv_path)
