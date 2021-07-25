@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 
 
 def preprocess_bitcoin_otc():
@@ -24,14 +23,26 @@ def preprocess_bitcoin_otc():
     snap_candidate = ['2011-05', '2011-11', '2012-05', '2012-11', '2013-05',
                       '2013-11', '2016-01']
 
-    nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True).unique()
+    dataframe = dataframe[dataframe['source'] != dataframe['target']]
+    print(dataframe.shape[0])
+
+    for i in range(2):
+        nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True)
+        node_degree_count = pd.DataFrame(nodes_set.value_counts(), columns=['degree'])
+        print(node_degree_count.shape[0])
+        nodes_set = node_degree_count[node_degree_count['degree'] > 1].index.tolist()
+        print(len(nodes_set))
+        dataframe = dataframe[dataframe.apply(lambda x: (x['source'] in nodes_set) and
+                                      (x['target'] in nodes_set), axis=1)]
+        print(dataframe.shape[0])
+
     node_dataframe = pd.DataFrame(nodes_set, columns=['node'])
     for i in range(len(snap_candidate)):
-        if i < 3:
+        if i < 1:
             tem = dataframe[['source', 'target']][dataframe['timestamp'] <= snap_candidate[i]]
         else:
             tem = dataframe[['source', 'target']][
-                (dataframe['timestamp'] <= snap_candidate[i]) & (dataframe['timestamp'] >= snap_candidate[i - 3])]
+                (dataframe['timestamp'] <= snap_candidate[i]) & (dataframe['timestamp'] >= snap_candidate[i - 1])]
         tem['source'] = tem['source'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
         tem['target'] = tem['target'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
         print(i, ':', len(tem))
@@ -61,7 +72,19 @@ def preprocess_bitcoin_alpha():
     snap_candidate = ['2011-05', '2011-11', '2012-05', '2012-11', '2013-05',
                       '2013-11', '2016-01']
 
-    nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True).unique()
+    dataframe = dataframe[dataframe['source'] != dataframe['target']]
+    print(dataframe.shape[0])
+
+    for i in range(2):
+        nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True)
+        node_degree_count = pd.DataFrame(nodes_set.value_counts(), columns=['degree'])
+        print(node_degree_count.shape[0])
+        nodes_set = node_degree_count[node_degree_count['degree'] > 3].index.tolist()
+        print(len(nodes_set))
+        dataframe = dataframe[dataframe.apply(lambda x: (x['source'] in nodes_set) and
+                                                        (x['target'] in nodes_set), axis=1)]
+        print(dataframe.shape[0])
+
     node_dataframe = pd.DataFrame(nodes_set, columns=['node'])
     for i in range(len(snap_candidate)):
         if i < 1:
@@ -87,7 +110,20 @@ def preprocess_college_msg():
     dataframe.sort_values(['timestamp'], inplace=True, ignore_index=True)
     snap_candidate = ['2004-04-30', '2004-05-06', '2004-05-11', '2004-05-16', '2004-05-21', '2004-05-26',
                       '2004-05-31', '2004-06-30', '2004-07-31', '2004-10-31']
-    nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True).unique()
+
+    dataframe = dataframe[dataframe['source'] != dataframe['target']]
+    print(dataframe.shape[0])
+
+    for i in range(2):
+        nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True)
+        node_degree_count = pd.DataFrame(nodes_set.value_counts(), columns=['degree'])
+        print(node_degree_count.shape[0])
+        nodes_set = node_degree_count[node_degree_count['degree'] > 3].index.tolist()
+        print(len(nodes_set))
+        dataframe = dataframe[dataframe.apply(lambda x: (x['source'] in nodes_set) and
+                                                        (x['target'] in nodes_set), axis=1)]
+        print(dataframe.shape[0])
+
     node_dataframe = pd.DataFrame(nodes_set, columns=['node'])
     for i in range(len(snap_candidate)):
         if i < 1:
@@ -111,8 +147,20 @@ def preprocess_enron_all():
                       '2002-01-08', '2002-01-09', '2002-01-10', '2002-01-11', '2002-01-14']
     dataframe = dataframe[['source', 'target', 'timestamp']][
         (dataframe['timestamp'] <= good_candidate[-1]) & (dataframe['timestamp'] > good_candidate[0])]
-    nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True).unique()
-    np.random.shuffle(nodes_set)
+
+    dataframe = dataframe[dataframe['source'] != dataframe['target']]
+    print(dataframe.shape[0])
+
+    for i in range(2):
+        nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True)
+        node_degree_count = pd.DataFrame(nodes_set.value_counts(), columns=['degree'])
+        print(node_degree_count.shape[0])
+        nodes_set = node_degree_count[node_degree_count['degree'] > 1].index.tolist()
+        print(len(nodes_set))
+        dataframe = dataframe[dataframe.apply(lambda x: (x['source'] in nodes_set) and
+                                                        (x['target'] in nodes_set), axis=1)]
+        print(dataframe.shape[0])
+
     node_dataframe = pd.DataFrame(nodes_set, columns=['node'])
     for i in range(1, len(good_candidate)):
         tem = dataframe[['source', 'target']][
@@ -120,8 +168,65 @@ def preprocess_enron_all():
         tem['source'] = tem['source'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
         tem['target'] = tem['target'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
         print(i, ':', len(tem))
-        tem.to_csv('../data/enron_all_shuffle/snapshot' + str(i) + ".edges", sep=' ', header=0, index=0)
+        tem.to_csv('../data/enron_all/snapshot' + str(i) + ".edges", sep=' ', header=0, index=0)
+
+
+def preprocess_dnc():
+    filepath = '../data/raw_data/out.dnc-temporalGraph'
+    dataframe = pd.read_csv(filepath, header=None, names=['source', 'target', 'rating', 'timestamp'], sep='\t')
+
+    dataframe['timestamp'] = pd.to_datetime(dataframe['timestamp'], unit='s').dt.strftime('%Y-%m-%d')
+    dataframe.sort_values(['timestamp'], inplace=True, ignore_index=True)
+    good_candidate = ['2016-05-01', '2016-05-06', '2016-05-11', '2016-05-16', '2016-05-19',
+                      '2016-05-26']
+
+    dataframe = dataframe[['source', 'target', 'timestamp']][
+        (dataframe['timestamp'] >= good_candidate[0])]
+    dataframe = dataframe[dataframe['source'] != dataframe['target']]
+    print(dataframe.shape[0])
+
+    nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True).unique()
+    node_dataframe = pd.DataFrame(nodes_set, columns=['node'])
+    print(node_dataframe.shape[0])
+    for i in range(1, len(good_candidate)):
+        tem = dataframe[['source', 'target']][
+            (dataframe['timestamp'] < good_candidate[i]) & (dataframe['timestamp'] >= good_candidate[i - 1])]
+        tem['source'] = tem['source'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
+        tem['target'] = tem['target'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
+        print(i, ':', len(tem))
+        tem.to_csv('../data/dnc/snapshot' + str(i) + ".edges", sep=' ', header=0, index=0)
+
+
+def preprocess_lkml():
+    filepath = '../data/raw_data/out.lkml-reply'
+    dataframe = pd.read_csv(filepath, header=None, names=['source', 'target', 'rating', 'timestamp'], sep='\t')
+
+    dataframe['timestamp'] = pd.to_datetime(dataframe['timestamp'], unit='s').dt.strftime('%Y-%m-%d')
+    dataframe.sort_values(['timestamp'], inplace=True, ignore_index=True)
+    nodes_candiate = ['2007-01-01', '2007-04-01']
+    node_dataframe = dataframe[['source', 'target']][
+        (dataframe['timestamp'] < nodes_candiate[-1]) & (dataframe['timestamp'] >= nodes_candiate[0])]
+    node_dataframe = node_dataframe[node_dataframe['source'] != node_dataframe['target']]
+    nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True).unique()
+    node_dataframe = pd.DataFrame(nodes_set, columns=['node'])
+    good_candidate = ['2007-04-01', '2016-05-06', '2016-05-11', '2016-05-16', '2016-05-19',
+                      '2016-05-26']
+
+    dataframe = dataframe[['source', 'target', 'timestamp']][
+        (dataframe['timestamp'] >= good_candidate[0])]
+    dataframe = dataframe[dataframe['source'] != dataframe['target']]
+    print(dataframe.shape[0])
+
+    nodes_set = pd.concat([dataframe['source'], dataframe['target']], ignore_index=True).unique()
+    node_dataframe = pd.DataFrame(nodes_set, columns=['node'])
+    for i in range(1, len(good_candidate)):
+        tem = dataframe[['source', 'target']][
+            (dataframe['timestamp'] < good_candidate[i]) & (dataframe['timestamp'] >= good_candidate[i - 1])]
+        tem['source'] = tem['source'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
+        tem['target'] = tem['target'].map(lambda x: node_dataframe[(node_dataframe['node'] == x)].index.tolist()[0] + 1)
+        print(i, ':', len(tem))
+        tem.to_csv('../data/lkml/snapshot' + str(i) + ".edges", sep=' ', header=0, index=0)
 
 
 if __name__ == '__main__':
-    preprocess_bitcoin_otc()
+    preprocess_dnc()
